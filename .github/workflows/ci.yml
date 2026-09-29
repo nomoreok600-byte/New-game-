@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Syntax-check all game modules
         run: |
@@ -25,3 +25,6 @@ jobs:
 
       - name: Headless battle & rotation invariants
         run: node scripts/ci-check.mjs
+
+      - name: Runtime boot verification (real modules, simulated frames)
+        run: node --experimental-vm-modules scripts/verify-boot.mjs
