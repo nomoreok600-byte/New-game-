@@ -193,8 +193,17 @@ export function createRenderer(canvas) {
     ctx.save();
     ctx.translate(f.x, f.y);
 
-    // Stealth shimmer (guerilla perk).
-    if (f.stealth) ctx.globalAlpha = 0.22;
+    // Stealth shimmer (guerilla perk) with a faint ghost outline so viewers
+    // can still track the fighter.
+    if (f.stealth) {
+      ctx.globalAlpha = 0.3;
+      ctx.strokeStyle = "rgba(34,211,238,0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(0, -26, 22, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Walk-cycle bob (readable, lively idle/motion).
+    const bob = Math.sin(f.bobT) * 2 * Math.min(1, Math.abs(f.vx) / 90);
 
     // Shadow.
     ctx.fillStyle = "rgba(0,0,0,0.35)";
@@ -204,12 +213,14 @@ export function createRenderer(canvas) {
     ctx.rotate(lean);
     if (f.deadT !== undefined && !f.alive) ctx.rotate(Math.min(1.5, f.deadT * 3)); // fall over
     const rolling = f.rollT > 0;
+    ctx.translate(0, bob);
 
-    // Legs.
+    // Legs with a proper stride cycle.
     ctx.strokeStyle = "#1f2937"; ctx.lineWidth = 5; ctx.lineCap = "round";
-    const stride = f.grounded && Math.abs(f.vx) > 30 ? Math.sin(t * 14) * 7 : 0;
-    ctx.beginPath(); ctx.moveTo(-4, -18); ctx.lineTo(-6 + stride, -2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(4, -18); ctx.lineTo(6 - stride, -2); ctx.stroke();
+    const stride = f.grounded && Math.abs(f.vx) > 30 ? Math.sin(f.bobT) * 8 : 0;
+    const lift = f.grounded && Math.abs(f.vx) > 30 ? Math.abs(Math.cos(f.bobT)) * 2 : 0;
+    ctx.beginPath(); ctx.moveTo(-4, -18); ctx.lineTo(-6 + stride, -2 - lift); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4, -18); ctx.lineTo(6 - stride, -2 - (lift > 0 ? 0 : lift)); ctx.stroke();
 
     // Body: national colors.
     const bodyGrad = ctx.createLinearGradient(-8, -40, 8, -16);
@@ -259,13 +270,19 @@ export function createRenderer(canvas) {
       } else {
         ctx.fillStyle = "#0f172a";
         const barrelLen = f.weapon === "sniper" ? 30 : f.weapon === "rpg" ? 26 : f.weapon === "shotgun" ? 22 : 16;
-        ctx.fillRect(6, -3, barrelLen, 6);
-        if (f.weapon === "dual") { ctx.fillRect(2, -8, 14, 4); }
-        if (f.weapon === "rpg") { ctx.fillStyle = "#dc2626"; ctx.fillRect(26, -5, 8, 10); }
+        ctx.fillRect(6 - f.recoil * 5, -3, barrelLen, 6); // gun kicks back on fire
+        if (f.weapon === "dual") { ctx.fillRect(2 - f.recoil * 4, -8, 14, 4); }
+        if (f.weapon === "rpg") { ctx.fillStyle = "#dc2626"; ctx.fillRect(26 - f.recoil * 5, -5, 8, 10); }
         if (f.weapon === "sniper" && f.laserT > 0) {
           ctx.strokeStyle = "rgba(239,68,68,0.8)"; ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.moveTo(34, 0); ctx.lineTo(1000, 0); ctx.stroke();
         }
+      }
+      // Katana deflection glint while the swing window is open.
+      if (w.deflect && f.deflectT > 0) {
+        ctx.strokeStyle = `rgba(226,232,240,${f.deflectT * 3})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, 40, f.aim - 1.2, f.aim + 1.2); ctx.stroke();
       }
       ctx.restore();
 
@@ -313,6 +330,53 @@ export function createRenderer(canvas) {
       }
       ctx.restore();
     }
+  }
+
+  // Bullet tracers: glowing streaks along velocity instead of static dots.
+  function drawProjectiles() {
+    for (const pr of match.projectiles) {
+      if (pr.type === "rocket") {
+        ctx.fillStyle = "#e2e8f0";
+        ctx.beginPath(); ctx.arc(pr.x, pr.y, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#f97316";
+        ctx.beginPath(); ctx.arc(pr.x - pr.vx * 0.012, pr.y - pr.vy * 0.012, 3, 0, Math.PI * 2); ctx.fill();
+        continue;
+      }
+      const sp = Math.hypot(pr.vx, pr.vy) || 1;
+      const len = Math.min(26, sp * 0.02);
+      const tx = pr.x - (pr.vx / sp) * len, ty = pr.y - (pr.vy / sp) * len;
+      const g = ctx.createLinearGradient(tx, ty, pr.x, pr.y);
+      g.addColorStop(0, "rgba(253,224,71,0)");
+      g.addColorStop(1, pr.owner === 2 ? "rgba(248,113,113,0.9)" : "rgba(253,230,138,0.95)");
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(pr.x, pr.y); ctx.stroke();
+    }
+  }
+
+  // Muzzle flashes: short-lived directional light blobs.
+  function drawFlashes() {
+    for (const fl of match.flashes) {
+      const a = fl.life / fl.maxLife;
+      const g = ctx.createRadialGradient(fl.x, fl.y, 1, fl.x, fl.y, fl.size);
+      g.addColorStop(0, `rgba(255,255,240,${0.95 * a})`);
+      g.addColorStop(0.4, `rgba(253,224,71,${0.6 * a})`);
+      g.addColorStop(1, "rgba(251,146,60,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(fl.x, fl.y, fl.size, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Expanding shockwave rings (hits, kills, explosions).
+  function drawRings() {
+    for (const rg of match.rings) {
+      const a = Math.max(0, rg.life / rg.maxLife);
+      ctx.strokeStyle = rg.color;
+      ctx.globalAlpha = a * 0.85;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(rg.x, rg.y, rg.r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawParticles() {
@@ -393,8 +457,11 @@ export function createRenderer(canvas) {
     drawBarrels();
     drawCrates(t);
     drawTurrets(t);
+    drawProjectiles();
+    drawFlashes();
     for (const f of match.fighters) drawFighter(f, t);
     drawParticles();
+    drawRings();
     drawFloatingTexts();
     ctx.restore();
 
