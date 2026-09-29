@@ -19,16 +19,50 @@ window.__wwUpdateMatch = updateMatch;
 
 const canvas = document.getElementById("arena");
 
+// Guard against stale/corrupt localStorage saves: normalize any save we
+// load so the show director can never crash on a missing field (this is the
+// real cause of "stuck on the pre-match countdown" after an app update),
+// and fall back to a clean Tournament #1 if the save is beyond repair.
+function sanitizeState(state) {
+  const fresh = () => freshBroadcast();
+  if (!state || typeof state !== "object") return { state: fresh(), reset: true };
+  let reset = false;
+  if (!Array.isArray(state.bracket) || state.bracket.length === 0 ||
+      !Array.isArray(state.active) || state.active.length === 0) {
+    return { state: fresh(), reset: true };
+  }
+  // Normalize: guarantee every field the director/sim touch exists.
+  const ensure = (val, make) => {
+    const ok = Array.isArray(val) ? val.length >= 0 : (val !== null && val !== undefined);
+    if (!ok) { reset = true; return make(); }
+    return val;
+  };
+  state.active = ensure(state.active, () => fresh().active);
+  state.benched = ensure(state.benched, () => fresh().benched);
+  state.bracket = ensure(state.bracket, () => fresh().bracket);
+  state.stats = ensure(state.stats, () => ({}));
+  state.history = ensure(state.history, () => []);
+  state.tickerQueue = Array.isArray(state.tickerQueue) ? state.tickerQueue : (reset = true, []);
+  if (typeof state.matchIndex !== "number") { state.matchIndex = 0; reset = true; }
+  if (typeof state.matchCount !== "number" || state.matchCount < 1) { state.matchCount = 127; reset = true; }
+  if (typeof state.tournamentIndex !== "number" || state.tournamentIndex < 1) { state.tournamentIndex = 1; reset = true; }
+  // Strip stale live-match remnants from a crashed session.
+  state.live = null;
+  return { state, reset };
+}
+
 function boot() {
   // Tell the index.html boot watchdog the show started (it explains hosting
   // problems like wrong-MIME .js files when this never fires).
   window.__wwBooted = true;
   // Resume-or-fresh: if a save exists, resume the tournament from the exact
-  // next unplayed match (spec §7 crash recovery).
+  // next unplayed match (spec §7 crash recovery). Stale saves are repaired
+  // in place; unrecoverable ones start clean automatically.
   let state = load();
-  if (!state) state = freshBroadcast();
-  if (!state.bracket || state.bracket.length === 0) state = freshBroadcast();
-  save(state); // persist immediately so even a mid-match-1 refresh resumes
+  let wasReset = false;
+  if (state) ({ state, reset: wasReset } = sanitizeState(state));
+  if (!state) { state = freshBroadcast(); wasReset = true; }
+  if (wasReset) save(state); // persist the repaired/fresh state immediately
 
   const renderer = createRenderer(canvas);
   renderer.setMatch(null);
