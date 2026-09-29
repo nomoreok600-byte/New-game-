@@ -78,6 +78,9 @@ export default function Home({
         <button className="btn btn-ghost btn-big" onClick={() => onPlay("time")}>
           <IconHourglass size={18} /> Puzzle Time · 2 min
         </button>
+        <a className="btn btn-ghost btn-big" href="/worldwar247/" style={{ textDecoration: "none", color: "var(--gold)", borderColor: "rgba(251,191,36,0.4)" }}>
+          🌍 World War 24/7 · Live 128-Nation War Stream
+        </a>
       </div>
 
       <div className="stats-strip">
