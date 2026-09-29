@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  world-war-247:
+    name: Validate World War 24/7 static broadcast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax-check all game modules
+        run: |
+          for f in public/worldwar247/js/*.js; do
+            node --check "$f"
+          done
+
+      - name: Headless battle & rotation invariants
+        run: node scripts/ci-check.mjs
