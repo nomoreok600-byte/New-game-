@@ -522,12 +522,75 @@ function syncWeatherPanel() {
 }
 
 // ————— Main loop —————
+// ————— Broadcast self-heal —————
+// If any frame of the show director throws (stale save, sim edge case, add-on
+// interference), the viewer would otherwise stare at a frozen countdown
+// forever. Instead: show a visible error card once, then auto-restart the
+// match cleanly from the persisted state.
+let healTimer = null;
+let healing = false;
+let lastErrorAt = 0;
+
+function showCrashCard(message) {
+  if (healing) return;
+  healing = true;
+  console.error("[WW247] frame error:", message);
+  let card = document.getElementById("wwCrashCard");
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "wwCrashCard";
+    card.style.cssText = "position:fixed;inset:auto 16px 16px 16px;z-index:9999;max-width:560px;margin:0 auto;" +
+      "background:#1a0505;border:2px solid #f87171;border-radius:14px;padding:16px 18px;color:#fecaca;" +
+      "font:600 13px/1.5 system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.6)";
+    card.innerHTML = '<b style="color:#f87171">⚠ BROADCAST GLITCH — auto-recovering</b><br>' +
+      '<span id="wwCrashMsg"></span><br><br>' +
+      '<button id="wwRestartBtn" style="background:#f87171;border:0;border-radius:8px;padding:8px 18px;font-weight:800;color:#1a0505;cursor:pointer;font-size:13px">CLEAN RESTART (wipes save)</button>' +
+      "<span style='opacity:.7;margin-left:10px'>or wait — the show restarts this match by itself</span>";
+    document.body.appendChild(card);
+    document.getElementById("wwRestartBtn").addEventListener("click", () => {
+      try { localStorage.removeItem("ww247.broadcast.v1"); } catch { /* private mode */ }
+      location.reload();
+    });
+  }
+  document.getElementById("wwCrashMsg").textContent = String(message || "Unknown error").slice(0, 300);
+  clearTimeout(healTimer);
+  healTimer = setTimeout(() => {
+    healing = false;
+    card.remove();
+    try { restartCurrentMatch(); } catch { location.reload(); }
+  }, 5000);
+}
+
+function restartCurrentMatch() {
+  // Drop the in-memory match and rebuild it from the same bracket slot.
+  try {
+    sim = null;
+    renderer.setMatch(null);
+    startPreMatch();
+  } catch (e) {
+    location.reload();
+  }
+}
+
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (!state || !matchRef) return;
 
+  try {
+    tick(now, dt);
+  } catch (err) {
+    // Throttle: show the card at most once per 10s if errors keep firing.
+    const t = performance.now();
+    if (t - lastErrorAt > 10000) {
+      lastErrorAt = t;
+      showCrashCard(err && err.message ? err.message : String(err));
+    }
+  }
+}
+
+function tick(now, dt) {
   // Slow side-panel/stat updater (~2 Hz).
   uiTick += dt;
   if (uiTick > 0.5) { uiTick = 0; syncWeatherPanel(); }
