@@ -68,12 +68,14 @@ for (let cycle = 1; cycle <= 3; cycle++) {
 }
 
 // ————— 4. Combat sim reliability —————
+// Pacing envelope: fights are tuned for 100–150s budgets with slow-cinematic
+// damage; the harness gives each match 120s of sim time so knockouts can land.
 let ended = 0, kos = 0;
 for (let t = 0; t < 20; t++) {
   const a = st.active[t * 6], b = st.active[t * 6 + 1];
-  const m = createMatch(a, b, { rng, fightSeconds: 10 });
+  const m = createMatch(a, b, { rng, fightSeconds: 45 });
   let guard = 0;
-  while (!m.ended && guard < 800) { updateMatch(m, 0.05); guard++; }
+  while (!m.ended && guard < 2400) { updateMatch(m, 0.05); guard++; }
   if (m.ended) {
     ended++;
     if (m.method !== "TIME LIMIT") kos++;

@@ -10,9 +10,14 @@ import { WW_COUNTRIES } from "./countries.js";
 export const ARENA_W = 1360;
 export const ARENA_H = 720;
 const GRAVITY = 2000;
-const MOVE_SPEED = 310;
-const JUMP_VY = 760;
+const MOVE_SPEED = 252; // slower, deliberate movement (was 310)
+const JUMP_VY = 720;
 const FIGHTER_R = 15;
+
+// Slow-cinematic pacing: fights breathe. Damage and fire rate are tuned so a
+// 1v1 lasts 45–90s of combat inside a 100–150s budget.
+const DMG_SCALE = 0.55;
+const CD_SCALE = 1.45;
 
 // ————— Weapons (spec §4) —————
 export const WEAPONS = {
@@ -133,6 +138,8 @@ function makeFighter(c, side) {
     deadT: 0,
     hitFlash: 0,
     laserT: 0,
+    recoil: 0, // gun kick animation
+    bobT: Math.random() * 10, // walk-cycle phase
   };
 }
 
@@ -146,7 +153,9 @@ export function createMatch(codeA, codeB, opts = {}) {
     codeA, codeB, biomeKey, biome, platforms,
     fighters: [makeFighter(country(codeA), 0), makeFighter(country(codeB), 1)],
     projectiles: [], particles: [], crates: [], turrets: [], barrels: [], fires: [],
-    time: 0, fightBudget: opts.fightSeconds || 50 + Math.floor(rng() * 21), // 50–70s per spec
+    flashes: [], // muzzle flashes (transient light)
+    rings: [], // impact/explosion shockwave rings
+    time: 0, fightBudget: opts.fightSeconds || 100 + Math.floor(rng() * 51), // 100–150s slow pacing
     drops: [], napalm: [],
     events: [],
     timeScale: 1, slowmoT: 0,
@@ -169,13 +178,13 @@ export function createMatch(codeA, codeB, opts = {}) {
   }
 
   // Air drop schedule across the fight window (spec §4).
-  const dropN = 3 + Math.floor(rng() * 3);
+  const dropN = 4 + Math.floor(rng() * 4);
   for (let i = 0; i < dropN; i++) {
-    match.drops.push({ at: 4 + ((i + rng()) / dropN) * (match.fightBudget - 12), kind: rng() < 0.15 ? "turret" : pickDrop(rng), done: false });
+    match.drops.push({ at: 8 + ((i + rng()) / dropN) * (match.fightBudget - 24), kind: rng() < 0.15 ? "turret" : pickDrop(rng), done: false });
   }
   // Napalm auto-drops.
   const napN = 1 + Math.floor(rng() * 2);
-  for (let i = 0; i < napN; i++) match.napalm.push({ at: 8 + rng() * (match.fightBudget - 16), done: false });
+  for (let i = 0; i < napN; i++) match.napalm.push({ at: 18 + rng() * (match.fightBudget - 36), done: false });
 
   return match;
 }
@@ -220,7 +229,7 @@ function fighterAI(match, f, foe, dt) {
   const canSee = !foe.stealth || dist(f.x, f.y, foe.x, foe.y) < 160;
 
   if (f.decisionT <= 0) {
-    f.decisionT = 0.16 + rng() * 0.22;
+    f.decisionT = 0.3 + rng() * 0.35; // slower, more readable AI reactions
     if (canSee) decideGoal(match, f, foe);
   }
 
@@ -281,7 +290,8 @@ function fighterAI(match, f, foe, dt) {
 
 function fire(match, f, foe) {
   const w = WEAPONS[f.weapon];
-  f.cd = w.cooldown * (0.92 + match.rng() * 0.16);
+  f.cd = w.cooldown * CD_SCALE * (0.92 + match.rng() * 0.16); // slower fire rate for pacing
+  f.recoil = 1;
   const sharp = f.perk === "Sharpshooter" ? 0.85 : 1; // +15% accuracy (spec §4)
   const berserk = f.perk === "Berserker" && f.hp < 30 ? 1.25 : 1;
   const sx = f.x + Math.cos(f.aim) * 24;
@@ -295,7 +305,8 @@ function fire(match, f, foe) {
     const ang = Math.atan2(foe.y - f.y, foe.x - f.x);
     const rel = Math.abs(((ang - f.aim + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
     if (d < w.range + FIGHTER_R && rel < w.arc / 2) {
-      damage(match, foe, f, w.dmg * berserk, f.weapon === "katana" ? "SLASHED" : "KNIFED");
+      damage(match, foe, f, w.dmg * DMG_SCALE * berserk, f.weapon === "katana" ? "SLASHED" : "KNIFED");
+      match.rings.push({ x: foe.x, y: foe.y - 20, r: 4, maxR: 44, life: 0.35, maxLife: 0.35, color: "#fff" });
     }
     match.events.push({ t: "swing", x: f.x, y: f.y - 20, dir: f.swingDir, weapon: f.weapon, c: f.c1 });
     return;
@@ -317,6 +328,10 @@ function fire(match, f, foe) {
     t: "muzzle", x: sx, y: sy, weapon: f.weapon, dir: f.aim,
     shake: w.shake || 0, c: f.c1,
   });
+  // Muzzle flash: a short-lived directional light at the barrel.
+  if (!w.melee) {
+    match.flashes.push({ x: sx, y: sy, dir: f.aim, life: 0.09, maxLife: 0.09, size: w.rocket ? 26 : w.cls === "Shotgun" ? 24 : 16, color: w.rocket ? "#fbbf24" : "#fde68a" });
+  }
   // Shell casing particle.
   match.particles.push({ x: sx, y: sy, vx: -Math.cos(f.aim) * 90 + (match.rng() - 0.5) * 60, vy: -140 - match.rng() * 80, life: 0.7, maxLife: 0.7, color: "#d4a017", size: 2.4, grav: 1, type: "casing" });
 }
@@ -330,15 +345,19 @@ function damage(match, target, source, amount, method) {
     dmg -= absorbed;
     if (target.shield <= 0) match.events.push({ t: "shieldbreak", x: target.x, y: target.y - 30 });
   }
-  target.hp -= dmg;
+  target.hp -= dmg * DMG_SCALE; // slow-cinematic pacing: hits feel weighty, fights last
   target.hitFlash = 0.18;
   if (source) source.dmgDealt += amount;
+  const dealt = dmg * DMG_SCALE;
   const blood = target.hp <= 0 ? 16 : 7;
   for (let i = 0; i < blood; i++) {
     const a = match.rng() * Math.PI * 2, s = 60 + match.rng() * 220;
     match.particles.push({ x: target.x, y: target.y - 20, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: 0.5 + match.rng() * 0.4, maxLife: 0.9, color: match.rng() < 0.75 ? "#b91c1c" : "#7f1d1d", size: 2 + match.rng() * 3, grav: 1, type: "blood" });
   }
-  match.events.push({ t: "hit", x: target.x, y: target.y - 24, dmg: Math.round(amount), by: source ? source.side : -1, on: target.side, c: target.c1, headshot: method === "RAILED" });
+  match.events.push({ t: "hit", x: target.x, y: target.y - 24, dmg: Math.round(dealt), by: source ? source.side : -1, on: target.side, c: target.c1, headshot: method === "RAILED" });
+  // Impact shockwave ring on every hit; bigger for heavy weapons.
+  const ringR = method === "RAILED" ? 54 : amount >= 20 ? 40 : 26;
+  match.rings.push({ x: target.x, y: target.y - 20, r: 3, maxR: ringR, life: 0.3, maxLife: 0.3, color: method === "RAILED" ? "#f87171" : "#fde68a" });
   match.intensity = Math.min(1, match.intensity + 0.12);
 
   if (target.hp <= 0) killFighter(match, target, source, method);
@@ -354,14 +373,17 @@ function killFighter(match, victim, killer, method) {
     if (killer.side === 0) match.killsA++;
     else match.killsB++;
   }
+  // Dramatic elimination shockwave.
+  match.rings.push({ x: victim.x, y: victim.y - 20, r: 6, maxR: 130, life: 0.7, maxLife: 0.7, color: "#f87171" });
+  match.rings.push({ x: victim.x, y: victim.y - 20, r: 2, maxR: 70, life: 0.5, maxLife: 0.5, color: "#fff" });
   const methods = { KNIFED: "KNIFED", SLASHED: "SLASHED", BLOWN_UP: "BLOWN UP", BURNED: "BURNED BY NAPALM", TURRET: "TURRET", TIME_LIMIT: "TIME LIMIT" };
   match.pendingKill = { victim: victim.side, killer: killer ? killer.side : -1, method: methods[method] || "GUNNED DOWN", x: victim.x, y: victim.y };
-  // Slow-motion killcam trigger (spec §3): 0.2x timescale handled by the director.
-  match.slowmoT = 1.25;
-  match.timeScale = 0.2;
+  // Slower killcam: hold the freeze longer.
   match.events.push({ t: "kill", x: victim.x, y: victim.y - 20, victim: victim.side, killer: killer ? killer.side : -1, c: victim.c1, method: methods[method] || "GUNNED DOWN" });
   match.shake = Math.max(match.shake, 14);
   match.flash = 0.5;
+  match.slowmoT = 2.1; // longer dramatic killcam (spec §3, 0.2x time)
+  match.timeScale = 0.2;
   for (let i = 0; i < 26; i++) {
     const a = match.rng() * Math.PI * 2, s = 80 + match.rng() * 300;
     match.particles.push({ x: victim.x, y: victim.y - 20, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 120, life: 0.7 + match.rng() * 0.6, maxLife: 1.3, color: match.rng() < 0.8 ? "#991b1b" : "#450a0a", size: 2.5 + match.rng() * 4, grav: 1, type: "blood" });
@@ -372,6 +394,7 @@ function explode(match, x, y, radius, dmg, source, method) {
   match.events.push({ t: "explosion", x, y, r: radius });
   match.shake = Math.max(match.shake, 16);
   match.intensity = Math.min(1, match.intensity + 0.3);
+  match.rings.push({ x, y, r: 8, maxR: radius * 1.2, life: 0.5, maxLife: 0.5, color: "#fbbf24" });
   for (let i = 0; i < 34; i++) {
     const a = match.rng() * Math.PI * 2, s = 80 + match.rng() * 380;
     const fire = match.rng() < 0.5;
@@ -615,6 +638,20 @@ export function updateMatch(match, rawDt) {
     if (rng() < dt * 22) match.particles.push({ x: fire.x + (rng() - 0.5) * fire.r * 1.6, y: fire.y - rng() * 20, vx: (rng() - 0.5) * 20, vy: -80 - rng() * 120, life: 0.4 + rng() * 0.4, maxLife: 0.8, color: rng() < 0.5 ? "#f97316" : "#facc15", size: 3 + rng() * 5, grav: -0.25, type: "spark" });
   }
   match.fires = match.fires.filter((f) => f.ttl > 0);
+
+  // Transient FX: muzzle flashes & expanding shockwave rings.
+  for (const fl of match.flashes) fl.life -= dt;
+  match.flashes = match.flashes.filter((fl) => fl.life > 0);
+  for (const rg of match.rings) {
+    rg.life -= dt;
+    rg.r += (rg.maxR - rg.r) * Math.min(1, dt * 9);
+  }
+  match.rings = match.rings.filter((rg) => rg.life > 0);
+  // Recoil & walk-cycle phase decay.
+  for (const f of match.fighters) {
+    f.recoil = Math.max(0, f.recoil - dt * 6);
+    f.bobT += dt * Math.abs(f.vx) / 55;
+  }
 
   // Particles.
   for (const p of match.particles) {

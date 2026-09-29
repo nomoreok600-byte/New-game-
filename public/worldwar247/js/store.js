@@ -15,10 +15,10 @@ const SAVE_VERSION = 1;
 export const FORMAT = {
   ACTIVE: 128,
   BENCHED: 64,
-  PRE_MATCH_S: 12,
-  FIGHT_MIN_S: 50,
-  FIGHT_MAX_S: 70,
-  POST_MATCH_S: 12,
+  PRE_MATCH_S: 6, // snappy countdown (was 12)
+  FIGHT_MIN_S: 100, // slow-cinematic pacing (was 50)
+  FIGHT_MAX_S: 150, // (was 70)
+  POST_MATCH_S: 9, // (was 12)
 };
 
 const TOTAL_NATIONS = WW_COUNTRIES.length; // 192
