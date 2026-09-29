@@ -1,0 +1,16 @@
+{
+  "name": "world-war-247",
+  "private": true,
+  "version": "1.1.0",
+  "description": "World War 24/7 — autonomous cinematic 1v1 nation tournament broadcast (static, zero dependencies)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "preview": "node server.js",
+    "build": "node scripts/prepare-dist.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
