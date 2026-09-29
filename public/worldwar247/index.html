@@ -458,9 +458,46 @@
   </div>
 
   <script type="module" src="js/main.js"></script>
+  <!-- Boot watchdog: main.js clears this when the show starts. If the game
+       never starts (e.g. the host serves .js with a wrong MIME type so the
+       browser refuses ES modules), the viewer sees the exact reason instead
+       of a frozen loading screen. -->
+  <script>
+    (function () {
+      window.__wwBooted = false;
+      var checks = 0;
+      function fail(msg) {
+        var b = document.getElementById("boot");
+        if (b && !window.__wwBooted) {
+          b.innerHTML = '<div style="max-width:640px;text-align:center;font-size:14px;letter-spacing:normal;line-height:1.6">' +
+            '<b style="color:#fbbf24">BROADCAST COULD NOT START</b><br>' + msg +
+            '<br><br>Fix on cPanel: File Manager → the game folder → make sure “Show Hidden Files” is on and <b>.htaccess</b> from the zip was extracted.<br>' +
+            '<span style="opacity:0.75">Details: ' + msg + '</span></div>';
+          b.style.display = "grid";
+          b.style.opacity = "1";
+        }
+      }
+      function tick() {
+        checks++;
+        if (window.__wwBooted) return; // main.js took over — all good
+        if (checks === 6) {
+          // 3s: module didn't run yet. Distinguish blocked modules (typeof
+          // import is fine but nothing executed) from a missing main.js.
+          fail("The app module did not start — usually the host is serving .js files with the wrong MIME type (text/plain). Upload the included .htaccess to the game folder, then hard-refresh (Ctrl+Shift+R).");
+        } else if (checks > 30) {
+          clearInterval(timer);
+        }
+      }
+      var timer = setInterval(tick, 500);
+      window.addEventListener("error", function (e) {
+        if (!window.__wwBooted && e && e.message) fail("Script error: " + e.message);
+      }, true);
+    })();
+  </script>
   <script>
     window.addEventListener("load", () => setTimeout(() => {
       const b = document.getElementById("boot");
+      if (b && !window.__wwBooted) return; // keep the watchdog message visible
       if (b) { b.style.transition = "opacity 0.5s"; b.style.opacity = "0"; setTimeout(() => b.remove(), 600); }
     }, 700));
   </script>

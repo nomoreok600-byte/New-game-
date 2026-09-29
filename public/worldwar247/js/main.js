@@ -20,6 +20,9 @@ window.__wwUpdateMatch = updateMatch;
 const canvas = document.getElementById("arena");
 
 function boot() {
+  // Tell the index.html boot watchdog the show started (it explains hosting
+  // problems like wrong-MIME .js files when this never fires).
+  window.__wwBooted = true;
   // Resume-or-fresh: if a save exists, resume the tournament from the exact
   // next unplayed match (spec §7 crash recovery).
   let state = load();
