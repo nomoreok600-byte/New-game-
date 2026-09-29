@@ -28,13 +28,52 @@ JSON export/import for backups (buttons in the top bar).
 cPanel UPLOAD (2 minutes)
 -------------------------
 1. Log in to cPanel → File Manager.
-2. Navigate to public_html/ (or a subfolder like /stream/).
+2. Navigate to public_html/ (do NOT go inside any subfolder).
 3. Click Upload → select this worldwar247.zip file.
-4. Back in File Manager: right-click the zip → Extract.
-5. (Optional) Move the extracted files directly into public_html/ if
-   you want the stream at your domain root instead of /worldwar247/.
+4. Back in File Manager: right-click the zip → Extract. It creates a
+   folder called worldwar247/ with everything inside.
+5. (Optional) Want the stream at your domain root instead? Enter the
+   worldwar247/ folder → Select All → Move → type /public_html/
 6. Visit https://yourdomain.com/worldwar247/ — the broadcast starts
    instantly at Tournament #1, Match 1.
+
+   ⚠ The game runs ONLY where you actually put the files. If you get
+   a 404, the folder name in the URL must match the folder you see
+   in File Manager.
+
+TROUBLESHOOTING (page loads but game doesn't start)
+---------------------------------------------------
+The page now diagnoses itself: if the game can't boot, the loading
+screen turns into a red/yellow notice telling you the exact problem.
+The usual causes on shared hosting:
+
+1. Stuck on the loading screen forever ("INITIALIZING..."):
+   Your host is serving .js files with the wrong MIME type, so the
+   browser refuses to run the game's ES modules. FIX: make sure the
+   .htaccess file from the zip was uploaded into the SAME folder as
+   index.html. In File Manager, click Settings (top right) → check
+   "Show Hidden Files (dotfiles)" — .htaccess is hidden by default.
+   Then hard-refresh the page (Ctrl+Shift+R).
+
+2. 404 Not Found:
+   The URL doesn't match where the files are. If you extracted into
+   a subfolder (say /stream/), the address is
+   https://yourdomain.com/stream/worldwar247/ (note the wrapper
+   folder). If you moved the files to the root, drop the folder
+   from the URL.
+
+3. Old version still showing after re-upload:
+   Browser cache — press Ctrl+Shift+R (or Cmd+Shift+R on Mac).
+   The included .htaccess also sends no-cache headers for app files.
+
+4. You see someone else's homepage:
+   Another index.html exists in the same folder and wins. Either
+   use the worldwar247/ subfolder (step 4) or move the old file.
+
+Quick self-test: open https://yourdomain.com/worldwar247/js/main.js
+in the browser. If it downloads/shows JavaScript text, hosting is
+fine. If it shows a 404 or renders as plain text with no download,
+see fixes 1–2 above.
 
 That's it. Point OBS at the page (Browser Source, 1920x1080) or just
 leave a browser/TV on the page — it runs unattended forever.
@@ -51,6 +90,7 @@ RECOMMENDED cPanel SETUP (OBS-style 24/7 output)
 FILES
 -----
 index.html       Broadcast layout (1920x1080 stage, HUD, ticker)
+.htaccess        Apache config: correct JS MIME types + no-cache
 favicon.svg      Favicon
 robots.txt       Crawler policy
 js/countries.js  192-nation database (flags, colors, perks, Elo)
